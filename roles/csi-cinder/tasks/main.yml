@@ -49,10 +49,11 @@
     cmd: >-
       helm install cinder-csi cpo/openstack-cinder-csi
       --namespace kube-system
-      --set csi.plugin.image.repository=localhost:{{ registry_port }}/k8scloudprovider/cinder-csi-plugin
+      --set csi.plugin.image.repository=localhost:{{ registry_port }}/cinder-csi-plugin
       --set csi.plugin.image.tag={{ csi_image_version }}
       --set csi.plugin.image.pullPolicy=IfNotPresent
       --set secret.enabled=true
+      --set secret.name=cloud-config
   environment:
     KUBECONFIG: "{{ kubeconfig | default('/etc/rancher/k3s/k3s.yaml') }}"
   changed_when: true

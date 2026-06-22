@@ -14,8 +14,6 @@
       --disable traefik
       --disable metrics-server
       --disable servicelb
-      --disable-cloud-controller
-      --kubelet-arg=cloud-provider=external
       --write-kubeconfig-mode=644
   changed_when: true
 

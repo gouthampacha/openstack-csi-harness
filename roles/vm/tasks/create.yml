@@ -95,16 +95,31 @@
   ansible.builtin.debug:
     msg: "VM {{ vm_name }} is running at {{ vm_ip }}"
 
-- name: Wait for SSH to become available
+- name: Wait for SSH to become available on hypervisor
   ansible.builtin.wait_for:
     host: "{{ vm_ip }}"
     port: 22
     delay: 5
     timeout: 300
 
+- name: Wait for SSH through ProxyJump from controller
+  ansible.builtin.command:
+    cmd: >-
+      ssh -o ProxyJump={{ ansible_user }}@{{ inventory_hostname }}
+      -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
+      -o ConnectTimeout=5 ubuntu@{{ vm_ip }} true
+  delegate_to: localhost
+  become: false
+  register: ssh_test
+  until: ssh_test.rc == 0
+  retries: 12
+  delay: 10
+  changed_when: false
+
 - name: Add VM to devstack group
   ansible.builtin.add_host:
     name: "{{ vm_name }}"
     ansible_host: "{{ vm_ip }}"
     ansible_user: ubuntu
+    ansible_ssh_common_args: "-o ProxyJump={{ ansible_user }}@{{ inventory_hostname }} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
     groups: devstack

@@ -1,12 +1,12 @@
 controllerplugin:
   image:
-    repository: "localhost:{{ registry_port }}/k8scloudprovider/manila-csi-plugin"
+    repository: "localhost:{{ registry_port }}/manila-csi-plugin"
     tag: "{{ csi_image_version }}"
     pullPolicy: IfNotPresent
 
 nodeplugin:
   image:
-    repository: "localhost:{{ registry_port }}/k8scloudprovider/manila-csi-plugin"
+    repository: "localhost:{{ registry_port }}/manila-csi-plugin"
     tag: "{{ csi_image_version }}"
     pullPolicy: IfNotPresent
 

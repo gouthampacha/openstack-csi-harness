@@ -84,6 +84,16 @@ directly on the VM instead:
 ansible-playbook playbooks/deploy-csi.yml -e @profiles/manila-lvm.yml -e build_on_vm=true
 ```
 
+## Known limitations
+
+**Cinder CSI requires OpenStack VMs**: The Cinder CSI node plugin calls the
+OpenStack metadata service (169.254.169.254) to get the instance UUID, which is
+needed for volume attachment via the Nova API. Since this harness runs k3s
+directly on a libvirt VM (not a Nova instance), Cinder CSI pods will deploy but
+volume attachment will fail. Full Cinder CSI e2e testing requires running k3s
+inside a Nova VM within DevStack. Manila CSI does not have this limitation since
+it mounts NFS/CephFS shares without needing a Nova instance identity.
+
 ## Configuration
 
 Default variables are in `group_vars/all.yml`. Override with `-e` flags or by
@@ -98,6 +108,7 @@ editing profile files.
 | `vm_disk_gb` | `200` | VM disk size (GB) |
 | `csi_image_version` | `v0.0.99` | CSI image tag |
 | `build_on_vm` | `false` | Build image on VM instead of locally |
+| `container_engine` | `docker` | Container engine (`docker` or `podman`) |
 | `e2e_timeout` | `1h45m` | e2e test timeout |
 
 ## Fetching logs

@@ -1,3 +1,4 @@
 ---
 devstack_user: stack
 devstack_workdir: /opt/stack/devstack
+devstack_branch: stable/2025.2

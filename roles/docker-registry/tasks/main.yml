@@ -25,9 +25,9 @@
       -addext "subjectAltName=DNS:localhost,IP:127.0.0.1,IP:{{ registry_ip.stdout | trim }}"
     creates: /etc/docker-registry/certs/cert.pem
 
-- name: Install docker.io
+- name: Install container engine
   ansible.builtin.apt:
-    name: docker.io
+    name: "{{ 'podman' if container_engine == 'podman' else 'docker.io' }}"
     state: present
 
 - name: Start Docker service
@@ -35,11 +35,12 @@
     name: docker
     state: started
     enabled: true
+  when: container_engine != 'podman'
 
-- name: Run Docker registry
+- name: Run container registry
   ansible.builtin.command:
     cmd: >-
-      docker run -d --restart=always --name registry
+      {{ container_engine }} run -d --restart=always --name registry
       -v /var/lib/docker-registry:/var/lib/registry
       -v /etc/docker-registry/certs:/certs
       -e REGISTRY_HTTP_ADDR=0.0.0.0:{{ registry_port }}
@@ -51,13 +52,13 @@
   changed_when: registry_start.rc == 0
   failed_when: false
 
-- name: Create Docker cert trust directory
+- name: Create container cert trust directory
   ansible.builtin.file:
     path: "/etc/docker/certs.d/localhost:{{ registry_port }}"
     state: directory
     mode: "0755"
 
-- name: Copy registry cert for Docker trust
+- name: Copy registry cert for container trust
   ansible.builtin.copy:
     src: /etc/docker-registry/certs/cert.pem
     dest: "/etc/docker/certs.d/localhost:{{ registry_port }}/ca.crt"

@@ -16,7 +16,7 @@
 
 # Build on VM
 - name: Build on VM
-  when: build_on_vm | default(false)
+  when: build_on_vm | default(false) | bool
   block:
     - name: Install build dependencies on VM
       ansible.builtin.apt:
@@ -24,42 +24,57 @@
           - make
           - golang-go
           - gcc
+          - docker-buildx
         state: present
 
-    - name: Synchronize CPO source to VM
-      ansible.posix.synchronize:
-        src: "{{ cpo_source_dir }}/"
-        dest: "/tmp/cloud-provider-openstack/"
-        rsync_opts:
-          - "--exclude=.git"
-          - "--exclude=vendor"
+    - name: Create CPO archive locally
+      ansible.builtin.command:
+        cmd: >-
+          tar czf /tmp/cpo-source.tar.gz
+          --exclude=.git --exclude=vendor
+          -C {{ cpo_source_dir }} .
+      delegate_to: localhost
+      become: false
+      changed_when: true
+
+    - name: Copy CPO archive to VM
+      ansible.builtin.copy:
+        src: /tmp/cpo-source.tar.gz
+        dest: /tmp/cpo-source.tar.gz
+        mode: "0644"
+
+    - name: Extract CPO source on VM
+      ansible.builtin.shell:
+        cmd: |
+          mkdir -p /tmp/cloud-provider-openstack
+          tar xzf /tmp/cpo-source.tar.gz -C /tmp/cloud-provider-openstack
+      changed_when: true
 
     - name: Build CSI image on VM
       ansible.builtin.command:
-        cmd: "make {{ csi_image_name }}"
+        cmd: "make build-local-image-{{ csi_image_name }}"
         chdir: /tmp/cloud-provider-openstack
       environment:
+        CONTAINER_ENGINE: "{{ container_engine }}"
         REGISTRY: "{{ registry_url }}"
         VERSION: "{{ csi_image_version }}"
       changed_when: true
 
-    - name: Tag and push image to local registry
+    - name: Push image to local registry
       ansible.builtin.shell:
-        cmd: |
-          docker tag {{ registry_url }}/{{ csi_image_name }}:{{ csi_image_version }} \
-            {{ registry_url }}/k8scloudprovider/{{ csi_image_name }}:{{ csi_image_version }}
-          docker push {{ registry_url }}/k8scloudprovider/{{ csi_image_name }}:{{ csi_image_version }}
+        cmd: "{{ container_engine }} push {{ registry_url }}/{{ csi_image_name }}:{{ csi_image_version }}"
       changed_when: true
 
 # Build locally and push
 - name: Build locally and push
-  when: not (build_on_vm | default(false))
+  when: not (build_on_vm | default(false) | bool)
   block:
     - name: Build and push CSI image locally
       ansible.builtin.command:
         cmd: "make push-multiarch-image-{{ csi_image_name }}"
         chdir: "{{ cpo_source_dir }}"
       environment:
+        CONTAINER_ENGINE: "{{ container_engine }}"
         REGISTRY: "{{ remote_registry_url }}"
         VERSION: "{{ csi_image_version }}"
       delegate_to: localhost
