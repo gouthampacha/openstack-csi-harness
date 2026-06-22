@@ -1,0 +1,84 @@
+---
+- name: Create registry directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - /etc/docker-registry/certs
+    - /var/lib/docker-registry
+
+- name: Get VM IP address
+  ansible.builtin.shell:
+    cmd: ip -4 addr show scope global | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -1
+  register: registry_ip
+  changed_when: false
+
+- name: Generate self-signed certificate
+  ansible.builtin.command:
+    cmd: >-
+      openssl req -x509 -newkey rsa:4096
+      -keyout /etc/docker-registry/certs/key.pem
+      -out /etc/docker-registry/certs/cert.pem
+      -days 365 -nodes
+      -subj "/CN=localhost"
+      -addext "subjectAltName=DNS:localhost,IP:127.0.0.1,IP:{{ registry_ip.stdout | trim }}"
+    creates: /etc/docker-registry/certs/cert.pem
+
+- name: Install docker.io
+  ansible.builtin.apt:
+    name: docker.io
+    state: present
+
+- name: Start Docker service
+  ansible.builtin.systemd:
+    name: docker
+    state: started
+    enabled: true
+
+- name: Run Docker registry
+  ansible.builtin.command:
+    cmd: >-
+      docker run -d --restart=always --name registry
+      -v /var/lib/docker-registry:/var/lib/registry
+      -v /etc/docker-registry/certs:/certs
+      -e REGISTRY_HTTP_ADDR=0.0.0.0:{{ registry_port }}
+      -e REGISTRY_HTTP_TLS_CERTIFICATE=/certs/cert.pem
+      -e REGISTRY_HTTP_TLS_KEY=/certs/key.pem
+      -p {{ registry_port }}:{{ registry_port }}
+      registry:2
+  register: registry_start
+  changed_when: registry_start.rc == 0
+  failed_when: false
+
+- name: Create Docker cert trust directory
+  ansible.builtin.file:
+    path: "/etc/docker/certs.d/localhost:{{ registry_port }}"
+    state: directory
+    mode: "0755"
+
+- name: Copy registry cert for Docker trust
+  ansible.builtin.copy:
+    src: /etc/docker-registry/certs/cert.pem
+    dest: "/etc/docker/certs.d/localhost:{{ registry_port }}/ca.crt"
+    remote_src: true
+    mode: "0644"
+
+- name: Create k3s registries config
+  ansible.builtin.copy:
+    content: |
+      mirrors:
+        "localhost:{{ registry_port }}":
+          endpoint:
+            - "https://localhost:{{ registry_port }}"
+      configs:
+        "localhost:{{ registry_port }}":
+          tls:
+            ca_file: "/etc/docker-registry/certs/cert.pem"
+    dest: /etc/rancher/k3s/registries.yaml
+    mode: "0644"
+
+- name: Restart k3s to pick up registry config
+  ansible.builtin.systemd:
+    name: k3s
+    state: restarted

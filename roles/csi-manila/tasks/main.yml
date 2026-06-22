@@ -1,0 +1,115 @@
+---
+- name: Install VolumeSnapshot CRDs
+  ansible.builtin.command:
+    cmd: "kubectl apply -f {{ item }}"
+  environment:
+    KUBECONFIG: "{{ kubeconfig | default('/etc/rancher/k3s/k3s.yaml') }}"
+  loop:
+    - https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/master/client/config/crd/snapshot.storage.k8s.io_volumesnapshotclasses.yaml
+    - https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/master/client/config/crd/snapshot.storage.k8s.io_volumesnapshotcontents.yaml
+    - https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/master/client/config/crd/snapshot.storage.k8s.io_volumesnapshots.yaml
+  changed_when: true
+
+- name: Deploy csi-driver-nfs (for NFS protocol)
+  when: manila_csi_protocol == "NFS"
+  ansible.builtin.command:
+    cmd: "kubectl apply -f {{ item }}"
+  environment:
+    KUBECONFIG: "{{ kubeconfig | default('/etc/rancher/k3s/k3s.yaml') }}"
+  loop:
+    - https://raw.githubusercontent.com/kubernetes-csi/csi-driver-nfs/master/deploy/v4.11.0/rbac-csi-nfs.yaml
+    - https://raw.githubusercontent.com/kubernetes-csi/csi-driver-nfs/master/deploy/v4.11.0/csi-nfs-driverinfo.yaml
+    - https://raw.githubusercontent.com/kubernetes-csi/csi-driver-nfs/master/deploy/v4.11.0/csi-nfs-node.yaml
+  changed_when: true
+
+- name: Deploy ceph-csi (for CEPHFS protocol)
+  when: manila_csi_protocol == "CEPHFS"
+  block:
+    - name: Add ceph-csi Helm repo
+      ansible.builtin.command:
+        cmd: helm repo add ceph-csi https://ceph.github.io/csi-charts
+      changed_when: true
+      failed_when: false
+
+    - name: Update Helm repos
+      ansible.builtin.command:
+        cmd: helm repo update
+      changed_when: false
+
+    - name: Install ceph-csi CephFS
+      ansible.builtin.command:
+        cmd: >-
+          helm install ceph-csi-cephfs ceph-csi/ceph-csi-cephfs
+          --namespace kube-system
+          --set nodeplugin.registrar.enabled=true
+          --set provisioner.enabled=false
+      environment:
+        KUBECONFIG: "{{ kubeconfig | default('/etc/rancher/k3s/k3s.yaml') }}"
+      changed_when: true
+
+- name: Get DevStack VM IP
+  ansible.builtin.shell:
+    cmd: ip -4 addr show scope global | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -1
+  register: devstack_ip_manila
+  changed_when: false
+
+- name: Create cloud-config secret
+  ansible.builtin.shell:
+    cmd: |
+      kubectl create secret generic cloud-config \
+        --namespace kube-system \
+        --from-literal=cloud.conf="$(cat <<CLOUDEOF
+      [Global]
+      auth-url=http://{{ devstack_ip_manila.stdout | trim }}/identity
+      username=admin
+      password=password
+      domain-name=Default
+      tenant-name=admin
+      region=RegionOne
+
+      [BlockStorage]
+      bs-version=v3
+      CLOUDEOF
+      )" --dry-run=client -o yaml | kubectl apply -f -
+  environment:
+    KUBECONFIG: "{{ kubeconfig | default('/etc/rancher/k3s/k3s.yaml') }}"
+  changed_when: true
+
+- name: Set forwarding endpoint based on protocol
+  ansible.builtin.set_fact:
+    fwd_endpoint: >-
+      {{ 'unix:///csi/csi-nfs/csi.sock' if manila_csi_protocol == 'NFS'
+         else 'unix:///csi/csi-cephfs/csi.sock' }}
+
+- name: Add cloud-provider-openstack Helm repo
+  ansible.builtin.command:
+    cmd: helm repo add cpo https://kubernetes.github.io/cloud-provider-openstack
+  changed_when: true
+  failed_when: false
+
+- name: Render Manila CSI Helm values
+  ansible.builtin.template:
+    src: values.yml.j2
+    dest: /tmp/manila-csi-values.yml
+    mode: "0644"
+
+- name: Install Manila CSI via Helm
+  ansible.builtin.command:
+    cmd: >-
+      helm install manila-csi cpo/openstack-manila-csi
+      --namespace kube-system
+      --values /tmp/manila-csi-values.yml
+  environment:
+    KUBECONFIG: "{{ kubeconfig | default('/etc/rancher/k3s/k3s.yaml') }}"
+  changed_when: true
+
+- name: Wait for Manila CSI pods to be running
+  ansible.builtin.command:
+    cmd: kubectl get pods -n kube-system -l app=openstack-manila-csi -o jsonpath='{.items[*].status.phase}'
+  environment:
+    KUBECONFIG: "{{ kubeconfig | default('/etc/rancher/k3s/k3s.yaml') }}"
+  register: manila_pods
+  until: "'Running' in manila_pods.stdout"
+  retries: 30
+  delay: 10
+  changed_when: false

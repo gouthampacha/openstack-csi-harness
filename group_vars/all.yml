@@ -1,0 +1,37 @@
+---
+# OpenStack branch
+devstack_branch: stable/2025.2
+
+# k3s
+k3s_version: v1.32.5+k3s1
+
+# VM defaults (for vm-create playbook)
+vm_name: devstack-csi
+vm_vcpus: 8
+vm_memory_mb: 32768
+vm_disk_gb: 200
+vm_os_variant: ubuntu24.04
+vm_image_url: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+vm_image_cache_dir: /var/lib/libvirt/images
+
+# DevStack user
+devstack_user: stack
+devstack_workdir: /opt/stack/devstack
+
+# CSI build
+csi_image_version: "v0.0.99"
+build_on_vm: false
+
+# Docker registry (on the DevStack VM)
+registry_port: 5000
+
+# e2e test defaults
+e2e_timeout: 1h45m
+e2e_log_dir: /var/log/csi-e2e
+
+# DevStack services (overridden by profiles)
+devstack_services: []
+devstack_plugins: []
+
+# CSI driver selection (overridden by profiles)
+csi_driver: ""

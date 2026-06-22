@@ -1,0 +1,17 @@
+---
+# Cinder CSI with Ceph RBD backend
+csi_driver: cinder
+devstack_services:
+  - nova
+  - glance
+  - neutron
+  - cinder
+
+devstack_plugins:
+  - name: devstack-plugin-ceph
+    repo: https://github.com/openstack/devstack-plugin-ceph
+
+cinder_driver: cinder.volume.drivers.rbd.RBDDriver
+cinder_rbd_pool: volumes
+cinder_rbd_ceph_conf: /etc/ceph/ceph.conf
+cinder_rbd_user: cinder

@@ -1,0 +1,67 @@
+---
+- name: Set CSI image name
+  ansible.builtin.set_fact:
+    csi_image_name: "{{ 'manila-csi-plugin' if csi_driver == 'manila' else 'cinder-csi-plugin' }}"
+
+- name: Get DevStack VM IP
+  ansible.builtin.shell:
+    cmd: ip -4 addr show scope global | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -1
+  register: devstack_ip
+  changed_when: false
+
+- name: Set registry URL
+  ansible.builtin.set_fact:
+    registry_url: "localhost:{{ registry_port }}"
+    remote_registry_url: "{{ devstack_ip.stdout | trim }}:{{ registry_port }}"
+
+# Build on VM
+- name: Build on VM
+  when: build_on_vm | default(false)
+  block:
+    - name: Install build dependencies on VM
+      ansible.builtin.apt:
+        name:
+          - make
+          - golang-go
+          - gcc
+        state: present
+
+    - name: Synchronize CPO source to VM
+      ansible.posix.synchronize:
+        src: "{{ cpo_source_dir }}/"
+        dest: "/tmp/cloud-provider-openstack/"
+        rsync_opts:
+          - "--exclude=.git"
+          - "--exclude=vendor"
+
+    - name: Build CSI image on VM
+      ansible.builtin.command:
+        cmd: "make {{ csi_image_name }}"
+        chdir: /tmp/cloud-provider-openstack
+      environment:
+        REGISTRY: "{{ registry_url }}"
+        VERSION: "{{ csi_image_version }}"
+      changed_when: true
+
+    - name: Tag and push image to local registry
+      ansible.builtin.shell:
+        cmd: |
+          docker tag {{ registry_url }}/{{ csi_image_name }}:{{ csi_image_version }} \
+            {{ registry_url }}/k8scloudprovider/{{ csi_image_name }}:{{ csi_image_version }}
+          docker push {{ registry_url }}/k8scloudprovider/{{ csi_image_name }}:{{ csi_image_version }}
+      changed_when: true
+
+# Build locally and push
+- name: Build locally and push
+  when: not (build_on_vm | default(false))
+  block:
+    - name: Build and push CSI image locally
+      ansible.builtin.command:
+        cmd: "make push-multiarch-image-{{ csi_image_name }}"
+        chdir: "{{ cpo_source_dir }}"
+      environment:
+        REGISTRY: "{{ remote_registry_url }}"
+        VERSION: "{{ csi_image_version }}"
+      delegate_to: localhost
+      become: false
+      changed_when: true

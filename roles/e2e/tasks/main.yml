@@ -1,0 +1,52 @@
+---
+- name: Create e2e log directory
+  ansible.builtin.file:
+    path: "{{ e2e_log_dir }}"
+    state: directory
+    mode: "0755"
+
+- name: Install Go (for running e2e tests)
+  ansible.builtin.apt:
+    name: golang-go
+    state: present
+
+- name: Set e2e test suite path
+  ansible.builtin.set_fact:
+    e2e_test_path: >-
+      {{ cpo_source_dir }}/tests/e2e/csi/{{ 'manila' if csi_driver == 'manila' else 'cinder' }}
+
+- name: Get DevStack VM IP for OpenStack auth
+  ansible.builtin.shell:
+    cmd: ip -4 addr show scope global | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -1
+  register: devstack_ip_e2e
+  changed_when: false
+
+- name: Run e2e tests
+  ansible.builtin.shell:
+    cmd: |
+      cd {{ cpo_source_dir }}
+      go test -v -timeout {{ e2e_timeout }} \
+        {{ '-run ' + e2e_focus if e2e_focus is defined else '' }} \
+        {{ '-skip ' + e2e_skip if e2e_skip is defined else '' }} \
+        ./tests/e2e/csi/{{ csi_driver }}/... \
+        2>&1 | tee {{ e2e_log_dir }}/e2e.log
+  environment:
+    KUBECONFIG: "{{ kubeconfig | default('/etc/rancher/k3s/k3s.yaml') }}"
+    OS_AUTH_URL: "http://{{ devstack_ip_e2e.stdout | trim }}/identity"
+    OS_USERNAME: admin
+    OS_PASSWORD: password
+    OS_PROJECT_NAME: admin
+    OS_DOMAIN_NAME: Default
+    OS_REGION_NAME: RegionOne
+  register: e2e_result
+  changed_when: false
+  failed_when: false
+
+- name: Display e2e test results
+  ansible.builtin.debug:
+    msg: "e2e tests {{ 'PASSED' if e2e_result.rc == 0 else 'FAILED' }} — logs at {{ e2e_log_dir }}/e2e.log"
+
+- name: Fail if e2e tests failed
+  ansible.builtin.fail:
+    msg: "e2e tests failed. Check {{ e2e_log_dir }}/e2e.log for details."
+  when: e2e_result.rc != 0

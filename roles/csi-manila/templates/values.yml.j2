@@ -1,0 +1,17 @@
+controllerplugin:
+  image:
+    repository: "localhost:{{ registry_port }}/k8scloudprovider/manila-csi-plugin"
+    tag: "{{ csi_image_version }}"
+    pullPolicy: IfNotPresent
+
+nodeplugin:
+  image:
+    repository: "localhost:{{ registry_port }}/k8scloudprovider/manila-csi-plugin"
+    tag: "{{ csi_image_version }}"
+    pullPolicy: IfNotPresent
+
+shareProtocol: "{{ manila_csi_protocol }}"
+
+fwdNodePluginEndpoint:
+  dir: /var/lib/kubelet/plugins/{{ 'csi-nfsplugin' if manila_csi_protocol == 'NFS' else 'cephfs.csi.ceph.com' }}
+  sockFile: csi.sock

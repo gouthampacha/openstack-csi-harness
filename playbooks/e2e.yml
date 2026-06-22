@@ -1,0 +1,6 @@
+---
+- name: Run e2e tests
+  hosts: devstack
+  become: true
+  roles:
+    - e2e

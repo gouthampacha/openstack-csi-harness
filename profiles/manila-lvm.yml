@@ -1,0 +1,22 @@
+---
+# Manila CSI with LVM backend (NFS shares)
+csi_driver: manila
+devstack_services:
+  - nova
+  - glance
+  - neutron
+  - manila
+
+manila_driver: manila.share.drivers.lvm.LVMShareDriver
+manila_dhss: false
+manila_protocols:
+  - NFS
+manila_backends:
+  - name: chicago
+    driver_handles_share_servers: false
+  - name: denver
+    driver_handles_share_servers: false
+share_backing_file_size: 32000M
+
+# CSI protocol for Manila (which fwd driver to use)
+manila_csi_protocol: NFS

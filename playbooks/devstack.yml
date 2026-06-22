@@ -1,0 +1,6 @@
+---
+- name: Install DevStack
+  hosts: devstack
+  become: true
+  roles:
+    - devstack

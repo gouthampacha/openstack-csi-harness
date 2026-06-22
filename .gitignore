@@ -1,0 +1,8 @@
+inventory/hosts
+*.retry
+.vagrant/
+*.pyc
+__pycache__/
+.cache/
+logs/
+*.log

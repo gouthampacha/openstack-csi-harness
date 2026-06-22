@@ -1,0 +1,24 @@
+---
+# Manila CSI with native CephFS backend (CephFS shares)
+csi_driver: manila
+devstack_services:
+  - nova
+  - glance
+  - neutron
+  - manila
+
+devstack_plugins:
+  - name: devstack-plugin-ceph
+    repo: https://github.com/openstack/devstack-plugin-ceph
+
+manila_driver: manila.share.drivers.cephfs.driver.CephFSDriver
+manila_dhss: false
+manila_cephfs_backend: native
+manila_protocols:
+  - CEPHFS
+manila_backends:
+  - name: cephfsnative
+    driver_handles_share_servers: false
+
+# CSI protocol for Manila
+manila_csi_protocol: CEPHFS

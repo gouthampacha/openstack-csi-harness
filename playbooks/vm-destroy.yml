@@ -1,0 +1,8 @@
+---
+- name: Destroy DevStack VM
+  hosts: hypervisor
+  tasks:
+    - name: Destroy VM
+      ansible.builtin.include_role:
+        name: vm
+        tasks_from: destroy

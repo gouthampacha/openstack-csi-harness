@@ -1,0 +1,37 @@
+---
+- name: Create DevStack VM
+  hosts: hypervisor
+  tasks:
+    - name: Create VM
+      ansible.builtin.include_role:
+        name: vm
+        tasks_from: create
+
+- name: Install DevStack
+  hosts: devstack
+  become: true
+  roles:
+    - devstack
+
+- name: Install k3s and registry
+  hosts: devstack
+  become: true
+  roles:
+    - k3s
+    - docker-registry
+
+- name: Build and deploy CSI
+  hosts: devstack
+  become: true
+  roles:
+    - csi-build
+    - role: csi-manila
+      when: csi_driver == "manila"
+    - role: csi-cinder
+      when: csi_driver == "cinder"
+
+- name: Run e2e tests
+  hosts: devstack
+  become: true
+  roles:
+    - e2e

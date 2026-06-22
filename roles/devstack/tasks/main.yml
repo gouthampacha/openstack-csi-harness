@@ -1,0 +1,81 @@
+---
+- name: Create stack user
+  ansible.builtin.user:
+    name: "{{ devstack_user }}"
+    shell: /bin/bash
+    home: /opt/stack
+    create_home: true
+
+- name: Grant stack user passwordless sudo
+  ansible.builtin.copy:
+    content: "{{ devstack_user }} ALL=(ALL) NOPASSWD:ALL"
+    dest: "/etc/sudoers.d/{{ devstack_user }}"
+    mode: "0440"
+
+- name: Install prerequisite packages
+  ansible.builtin.apt:
+    name:
+      - git
+      - python3-pip
+      - python3-dev
+      - build-essential
+      - libssl-dev
+      - libffi-dev
+      - bridge-utils
+      - iproute2
+    state: present
+    update_cache: true
+
+- name: Clone DevStack
+  ansible.builtin.git:
+    repo: https://github.com/openstack/devstack.git
+    dest: "{{ devstack_workdir }}"
+    version: "{{ devstack_branch }}"
+  become_user: "{{ devstack_user }}"
+
+- name: Get local IP address
+  ansible.builtin.shell:
+    cmd: ip -4 addr show scope global | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -1
+  register: local_ip
+  changed_when: false
+
+- name: Set local IP fact
+  ansible.builtin.set_fact:
+    local_ip_address: "{{ local_ip.stdout | trim }}"
+
+- name: Render local.conf
+  ansible.builtin.template:
+    src: local.conf.j2
+    dest: "{{ devstack_workdir }}/local.conf"
+    owner: "{{ devstack_user }}"
+    group: "{{ devstack_user }}"
+    mode: "0644"
+
+- name: Run stack.sh
+  ansible.builtin.command:
+    cmd: "{{ devstack_workdir }}/stack.sh"
+    chdir: "{{ devstack_workdir }}"
+  become_user: "{{ devstack_user }}"
+  environment:
+    HOME: /opt/stack
+  timeout: 5400
+
+- name: Delete legacy Manila endpoints (gophercloud v2 compatibility)
+  when: "'manila' in devstack_services"
+  block:
+    - name: Source admin credentials and get shared-file-system endpoints
+      ansible.builtin.shell:
+        cmd: |
+          source {{ devstack_workdir }}/openrc admin admin
+          openstack endpoint list --service shared-file-system -f json
+      register: manila_endpoints
+      changed_when: false
+
+    - name: Remove shared-file-system endpoints (use sharev2 instead)
+      ansible.builtin.shell:
+        cmd: |
+          source {{ devstack_workdir }}/openrc admin admin
+          openstack endpoint delete {{ item }}
+      loop: "{{ (manila_endpoints.stdout | from_json) | map(attribute='ID') | list }}"
+      when: manila_endpoints.stdout | from_json | length > 0
+      changed_when: true

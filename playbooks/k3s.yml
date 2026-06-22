@@ -1,0 +1,7 @@
+---
+- name: Install k3s and Docker registry
+  hosts: devstack
+  become: true
+  roles:
+    - k3s
+    - docker-registry

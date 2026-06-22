@@ -1,0 +1,8 @@
+---
+- name: Create DevStack VM
+  hosts: hypervisor
+  tasks:
+    - name: Create VM
+      ansible.builtin.include_role:
+        name: vm
+        tasks_from: create

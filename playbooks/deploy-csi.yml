@@ -1,0 +1,10 @@
+---
+- name: Build and deploy CSI driver
+  hosts: devstack
+  become: true
+  roles:
+    - csi-build
+    - role: csi-manila
+      when: csi_driver == "manila"
+    - role: csi-cinder
+      when: csi_driver == "cinder"

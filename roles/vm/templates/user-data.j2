@@ -1,0 +1,16 @@
+#cloud-config
+hostname: {{ vm_name }}
+manage_etc_hosts: true
+users:
+  - name: ubuntu
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    lock_passwd: true
+    ssh_authorized_keys:
+      - {{ ssh_public_key_content }}
+packages:
+  - python3
+  - python3-pip
+  - qemu-guest-agent
+runcmd:
+  - systemctl enable --now qemu-guest-agent

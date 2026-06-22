@@ -1,0 +1,9 @@
+---
+vm_name: devstack-csi
+vm_vcpus: 8
+vm_memory_mb: 32768
+vm_disk_gb: 200
+vm_os_variant: ubuntu24.04
+vm_image_url: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+vm_image_cache_dir: /var/lib/libvirt/images
+vm_network: default

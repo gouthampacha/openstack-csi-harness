@@ -1,0 +1,21 @@
+# Copy this file to inventory/hosts and fill in your values.
+# Do NOT commit inventory/hosts — it is .gitignored.
+
+[hypervisor]
+# The machine running libvirt where the DevStack VM will be created.
+# Example: myhost ansible_host=10.0.0.1 ansible_user=root
+# myhost ansible_user=root
+
+[devstack]
+# The DevStack VM. Set this after vm-create.yml runs, or manually if
+# you already have a VM.
+# Example: devstack-vm ansible_host=192.168.122.100 ansible_user=ubuntu
+# devstack-vm ansible_host=192.168.122.100 ansible_user=ubuntu ansible_ssh_common_args='-o ProxyJump=root@myhost'
+
+[all:vars]
+# Absolute path to your local cloud-provider-openstack clone.
+# Used to build CSI driver images and run e2e tests.
+# cpo_source_dir=/home/user/repos/cloud-provider-openstack
+
+# Path to SSH public key to inject into the DevStack VM (for vm-create).
+# ssh_public_key=~/.ssh/id_rsa.pub

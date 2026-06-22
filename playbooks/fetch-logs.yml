@@ -1,0 +1,70 @@
+---
+- name: Fetch logs from DevStack VM
+  hosts: devstack
+  tasks:
+    - name: Create local logs directory
+      delegate_to: localhost
+      become: false
+      ansible.builtin.file:
+        path: "./logs/{{ inventory_hostname }}"
+        state: directory
+        mode: "0755"
+
+    - name: Fetch DevStack log
+      ansible.builtin.fetch:
+        src: /opt/stack/logs/stack.sh.log
+        dest: "./logs/{{ inventory_hostname }}/"
+        flat: true
+        fail_on_missing: false
+
+    - name: Export k3s logs
+      ansible.builtin.shell:
+        cmd: journalctl -u k3s > /tmp/k3s.log
+      changed_when: false
+
+    - name: Fetch k3s log file
+      ansible.builtin.fetch:
+        src: /tmp/k3s.log
+        dest: "./logs/{{ inventory_hostname }}/"
+        flat: true
+
+    - name: Export CSI pod logs
+      ansible.builtin.shell:
+        cmd: |
+          kubectl get pods -A -o wide > /tmp/pods.txt 2>&1
+          for ns in kube-system default; do
+            for pod in $(kubectl get pods -n $ns --no-headers -o custom-columns=":metadata.name" 2>/dev/null | grep -E "csi|manila|cinder"); do
+              kubectl logs -n $ns $pod --all-containers > /tmp/pod-${ns}-${pod}.log 2>&1
+            done
+          done
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+      changed_when: false
+      failed_when: false
+
+    - name: Fetch pod status
+      ansible.builtin.fetch:
+        src: /tmp/pods.txt
+        dest: "./logs/{{ inventory_hostname }}/"
+        flat: true
+        fail_on_missing: false
+
+    - name: Find pod log files
+      ansible.builtin.find:
+        paths: /tmp
+        patterns: "pod-*.log"
+      register: pod_logs
+
+    - name: Fetch pod log files
+      ansible.builtin.fetch:
+        src: "{{ item.path }}"
+        dest: "./logs/{{ inventory_hostname }}/"
+        flat: true
+      loop: "{{ pod_logs.files }}"
+
+    - name: Fetch e2e test results
+      ansible.builtin.fetch:
+        src: "{{ e2e_log_dir | default('/var/log/csi-e2e') }}/e2e.log"
+        dest: "./logs/{{ inventory_hostname }}/"
+        flat: true
+        fail_on_missing: false

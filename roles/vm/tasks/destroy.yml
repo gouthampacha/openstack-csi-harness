@@ -1,0 +1,30 @@
+---
+- name: Check if VM exists
+  ansible.builtin.command:
+    cmd: virsh dominfo {{ vm_name }}
+  register: vm_info
+  changed_when: false
+  failed_when: false
+
+- name: Destroy VM (if running)
+  ansible.builtin.command:
+    cmd: virsh destroy {{ vm_name }}
+  when: vm_info.rc == 0
+  changed_when: true
+  failed_when: false
+
+- name: Undefine VM and remove storage
+  ansible.builtin.command:
+    cmd: virsh undefine {{ vm_name }} --remove-all-storage
+  when: vm_info.rc == 0
+  changed_when: true
+
+- name: Remove cloud-init ISO
+  ansible.builtin.file:
+    path: "{{ vm_image_cache_dir }}/{{ vm_name }}-cidata.iso"
+    state: absent
+
+- name: Remove cloud-init temp directory
+  ansible.builtin.file:
+    path: "/tmp/{{ vm_name }}-cloud-init"
+    state: absent

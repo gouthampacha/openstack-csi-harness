@@ -1,0 +1,8 @@
+---
+# Cinder CSI with LVM backend
+csi_driver: cinder
+devstack_services:
+  - nova
+  - glance
+  - neutron
+  - cinder
