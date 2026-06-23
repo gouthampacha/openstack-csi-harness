@@ -74,6 +74,18 @@
   timeout: 5400
   when: devstack_check.rc != 0
 
+- name: Fix libvirt qemu permissions for nested virtualization
+  when: "'nova' in devstack_services"
+  ansible.builtin.shell:
+    cmd: |
+      if [ -f /etc/libvirt/qemu.conf ]; then
+        sed -i 's/^#\?user = .*/user = "root"/' /etc/libvirt/qemu.conf
+        sed -i 's/^#\?group = .*/group = "root"/' /etc/libvirt/qemu.conf
+        systemctl restart libvirtd
+      fi
+    executable: /bin/bash
+  changed_when: true
+
 - name: Delete legacy Manila endpoints (gophercloud v2 compatibility)
   when: "'manila' in devstack_services"
   block:

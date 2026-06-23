@@ -10,7 +10,7 @@
 
 - name: Get VM IP address
   ansible.builtin.shell:
-    cmd: ip -4 addr show scope global | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -1
+    cmd: ip -4 addr show scope global | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | grep -v '^169\.254\.' | head -1
   register: registry_ip
   changed_when: false
 
@@ -66,6 +66,7 @@
     mode: "0644"
 
 - name: Create k3s registries config
+  when: csi_driver != "cinder"
   ansible.builtin.copy:
     content: |
       mirrors:
@@ -80,6 +81,7 @@
     mode: "0644"
 
 - name: Restart k3s to pick up registry config
+  when: csi_driver != "cinder"
   ansible.builtin.systemd:
     name: k3s
     state: restarted

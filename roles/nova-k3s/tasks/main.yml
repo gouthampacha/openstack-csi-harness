@@ -68,6 +68,36 @@
     HOME: /opt/stack
   changed_when: true
 
+- name: Allocate networking for k3s VM
+  ansible.builtin.shell:
+    cmd: |
+      source {{ devstack_workdir }}/openrc demo demo
+
+      port_id=$(openstack port show {{ nova_vm_name }}-port -f value -c id 2>/dev/null)
+      if [ -z "$port_id" ]; then
+        port_id=$(openstack port create {{ nova_vm_name }}-port \
+          --network private --security-group {{ nova_vm_sg }} \
+          -f value -c id)
+      fi
+
+      fip=$(openstack floating ip list --port $port_id -c "Floating IP Address" -f value)
+      if [ -z "$fip" ]; then
+        fip=$(openstack floating ip create public -c floating_ip_address -f value)
+        openstack floating ip set $fip --port $port_id
+      fi
+
+      echo "$fip"
+    executable: /bin/bash
+  become_user: "{{ devstack_user }}"
+  environment:
+    HOME: /opt/stack
+  register: k3s_fip_result
+  changed_when: true
+
+- name: Set k3s VM floating IP fact
+  ansible.builtin.set_fact:
+    k3s_vm_fip: "{{ k3s_fip_result.stdout_lines | last | trim }}"
+
 - name: Render k3s cloud-init userdata
   ansible.builtin.template:
     src: userdata.yml.j2
@@ -81,18 +111,13 @@
 
       openstack server show {{ nova_vm_name }} > /dev/null 2>&1
       if [ $? -ne 0 ]; then
-        port_id=$(openstack port create {{ nova_vm_name }}-port \
-          --network private --security-group {{ nova_vm_sg }} \
-          -f value -c id)
-        fip=$(openstack floating ip create public -c floating_ip_address -f value)
-        openstack floating ip set $fip --port $port_id
-
         openstack server create {{ nova_vm_name }} \
           --image {{ nova_vm_image }} \
           --flavor {{ nova_vm_flavor }} \
           --key-name {{ nova_vm_keypair }} \
-          --nic port-id=$port_id \
+          --nic port-id=$(openstack port show {{ nova_vm_name }}-port -f value -c id) \
           --user-data /tmp/k3s-userdata.yml \
+          --config-drive true \
           --wait
       fi
     executable: /bin/bash
@@ -100,23 +125,6 @@
   environment:
     HOME: /opt/stack
   changed_when: true
-
-- name: Get k3s VM floating IP
-  ansible.builtin.shell:
-    cmd: |
-      source {{ devstack_workdir }}/openrc demo demo
-      openstack floating ip list --port {{ nova_vm_name }}-port \
-        -c "Floating IP Address" -f value
-    executable: /bin/bash
-  become_user: "{{ devstack_user }}"
-  environment:
-    HOME: /opt/stack
-  register: k3s_fip
-  changed_when: false
-
-- name: Set k3s VM floating IP fact
-  ansible.builtin.set_fact:
-    k3s_vm_fip: "{{ k3s_fip.stdout | trim }}"
 
 - name: Wait for SSH on k3s VM
   ansible.builtin.wait_for:
