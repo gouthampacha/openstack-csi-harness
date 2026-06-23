@@ -90,6 +90,7 @@ MANILA_ENABLED_BACKENDS={{ manila_backends | map(attribute='name') | join(',') }
 MANILA_BACKEND{{ loop.index }}_CONFIG_GROUP_NAME={{ backend.name }}
 MANILA_SHARE_BACKEND{{ loop.index }}_NAME={{ backend.name | upper }}
 MANILA_OPTGROUP_{{ backend.name }}_driver_handles_share_servers={{ backend.driver_handles_share_servers | default(manila_dhss) | default(false) | ternary('True', 'False') }}
+MANILA_OPTGROUP_{{ backend.name }}_lvm_share_export_ips={{ local_ip_address }}
 {% endfor %}
 {% endif %}
 

@@ -51,6 +51,19 @@
     group: "{{ devstack_user }}"
     mode: "0644"
 
+- name: Check if DevStack is already installed
+  ansible.builtin.shell:
+    cmd: |
+      source {{ devstack_workdir }}/openrc admin admin
+      openstack endpoint list -f json
+    executable: /bin/bash
+  become_user: "{{ devstack_user }}"
+  environment:
+    HOME: /opt/stack
+  register: devstack_check
+  changed_when: false
+  failed_when: false
+
 - name: Run stack.sh
   ansible.builtin.command:
     cmd: "{{ devstack_workdir }}/stack.sh"
@@ -59,6 +72,7 @@
   environment:
     HOME: /opt/stack
   timeout: 5400
+  when: devstack_check.rc != 0
 
 - name: Delete legacy Manila endpoints (gophercloud v2 compatibility)
   when: "'manila' in devstack_services"
@@ -68,6 +82,7 @@
         cmd: |
           source {{ devstack_workdir }}/openrc admin admin
           openstack endpoint list --service shared-file-system -f json
+        executable: /bin/bash
       register: manila_endpoints
       changed_when: false
 
@@ -76,6 +91,47 @@
         cmd: |
           source {{ devstack_workdir }}/openrc admin admin
           openstack endpoint delete {{ item }}
+        executable: /bin/bash
       loop: "{{ (manila_endpoints.stdout | from_json) | map(attribute='ID') | list }}"
       when: manila_endpoints.stdout | from_json | length > 0
+      changed_when: true
+
+- name: Create default Manila share type
+  when: "'manila' in devstack_services"
+  ansible.builtin.shell:
+    cmd: |
+      source {{ devstack_workdir }}/openrc admin admin
+      existing=$(manila type-list --columns id --format value 2>/dev/null | wc -l)
+      if [ "$existing" -eq 0 ]; then
+        manila type-create default false
+        manila type-key default set \
+          snapshot_support=True \
+          create_share_from_snapshot_support=True \
+          revert_to_snapshot_support=True \
+          mount_snapshot_support=True
+      fi
+    executable: /bin/bash
+  changed_when: true
+
+- name: Set up fake metadata service for CSI node registration
+  block:
+    - name: Add metadata link-local IP
+      ansible.builtin.command:
+        cmd: ip addr add 169.254.169.254/32 dev lo
+      register: metadata_ip
+      changed_when: metadata_ip.rc == 0
+      failed_when: false
+
+    - name: Create fake metadata directory
+      ansible.builtin.file:
+        path: /var/www/html/openstack/latest
+        state: directory
+        mode: "0755"
+
+    - name: Generate fake metadata JSON
+      ansible.builtin.shell:
+        cmd: |
+          printf '{"uuid": "%s", "name": "%s", "availability_zone": "nova"}' \
+            "$(cat /etc/machine-id)" "$(hostname)" \
+            > /var/www/html/openstack/latest/meta_data.json
       changed_when: true

@@ -53,33 +53,26 @@
   register: devstack_ip_manila
   changed_when: false
 
-- name: Create cloud-config secret
+- name: Create Manila CSI cloud-config secret
   ansible.builtin.shell:
     cmd: |
-      kubectl create secret generic cloud-config \
-        --namespace kube-system \
-        --from-literal=cloud.conf="$(cat <<CLOUDEOF
-      [Global]
-      auth-url=http://{{ devstack_ip_manila.stdout | trim }}/identity
-      username=admin
-      password=password
-      domain-name=Default
-      tenant-name=admin
-      region=RegionOne
-
-      [BlockStorage]
-      bs-version=v3
-      CLOUDEOF
-      )" --dry-run=client -o yaml | kubectl apply -f -
+      kubectl apply -f - <<'EOF'
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: cloud-config
+        namespace: kube-system
+      stringData:
+        os-authURL: "http://{{ devstack_ip_manila.stdout | trim }}/identity"
+        os-region: "RegionOne"
+        os-userName: "admin"
+        os-password: "password"
+        os-projectName: "admin"
+        os-domainID: "default"
+      EOF
   environment:
     KUBECONFIG: "{{ kubeconfig | default('/etc/rancher/k3s/k3s.yaml') }}"
   changed_when: true
-
-- name: Set forwarding endpoint based on protocol
-  ansible.builtin.set_fact:
-    fwd_endpoint: >-
-      {{ 'unix:///csi/csi-nfs/csi.sock' if manila_csi_protocol == 'NFS'
-         else 'unix:///csi/csi-cephfs/csi.sock' }}
 
 - name: Add cloud-provider-openstack Helm repo
   ansible.builtin.command:
@@ -113,3 +106,30 @@
   retries: 30
   delay: 10
   changed_when: false
+
+- name: Create Manila NFS StorageClass
+  when: manila_csi_protocol == "NFS"
+  ansible.builtin.shell:
+    cmd: |
+      kubectl apply -f - <<'EOF'
+      apiVersion: storage.k8s.io/v1
+      kind: StorageClass
+      metadata:
+        name: csi-manila-nfs
+      provisioner: nfs.manila.csi.openstack.org
+      reclaimPolicy: Delete
+      allowVolumeExpansion: true
+      parameters:
+        type: default
+        csi.storage.k8s.io/provisioner-secret-name: cloud-config
+        csi.storage.k8s.io/provisioner-secret-namespace: kube-system
+        csi.storage.k8s.io/controller-expand-secret-name: cloud-config
+        csi.storage.k8s.io/controller-expand-secret-namespace: kube-system
+        csi.storage.k8s.io/node-stage-secret-name: cloud-config
+        csi.storage.k8s.io/node-stage-secret-namespace: kube-system
+        csi.storage.k8s.io/node-publish-secret-name: cloud-config
+        csi.storage.k8s.io/node-publish-secret-namespace: kube-system
+      EOF
+  environment:
+    KUBECONFIG: "{{ kubeconfig | default('/etc/rancher/k3s/k3s.yaml') }}"
+  changed_when: true
