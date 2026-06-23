@@ -6,5 +6,7 @@
     - csi-build
     - role: csi-manila
       when: csi_driver == "manila"
+    - role: nova-k3s
+      when: csi_driver == "cinder"
     - role: csi-cinder
       when: csi_driver == "cinder"

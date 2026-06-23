@@ -1,0 +1,8 @@
+---
+nova_vm_name: k3s-cinder
+nova_vm_flavor: ds2G
+nova_vm_image: ubuntu-noble
+nova_vm_image_url: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+nova_vm_keypair: k3s-keypair
+nova_vm_sg: k3s-sg
+k3s_version: v1.32.5+k3s1

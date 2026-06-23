@@ -10,30 +10,38 @@
     - https://raw.githubusercontent.com/kubernetes-csi/external-snapshotter/master/client/config/crd/snapshot.storage.k8s.io_volumesnapshots.yaml
   changed_when: true
 
-- name: Get DevStack VM IP
+- name: Get DevStack host IP
   ansible.builtin.shell:
     cmd: ip -4 addr show scope global | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -1
   register: devstack_ip_cinder
   changed_when: false
 
-- name: Create cloud-config secret
+- name: Set Cinder registry URL
+  ansible.builtin.set_fact:
+    cinder_image_registry: "{{ cinder_registry_url | default('localhost:' + (registry_port | string)) }}"
+
+- name: Create cloud-config secret for Cinder CSI
   ansible.builtin.shell:
     cmd: |
-      kubectl create secret generic cloud-config \
-        --namespace kube-system \
-        --from-literal=cloud.conf="$(cat <<CLOUDEOF
-      [Global]
-      auth-url=http://{{ devstack_ip_cinder.stdout | trim }}/identity
-      username=admin
-      password=password
-      domain-name=Default
-      tenant-name=admin
-      region=RegionOne
+      kubectl apply -f - <<'KEOF'
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: cloud-config
+        namespace: kube-system
+      stringData:
+        cloud.conf: |
+          [Global]
+          auth-url=http://{{ devstack_ip_cinder.stdout | trim }}/identity
+          username=admin
+          password=password
+          domain-name=Default
+          tenant-name=admin
+          region=RegionOne
 
-      [BlockStorage]
-      bs-version=v3
-      CLOUDEOF
-      )" --dry-run=client -o yaml | kubectl apply -f -
+          [BlockStorage]
+          bs-version=v3
+      KEOF
   environment:
     KUBECONFIG: "{{ kubeconfig | default('/etc/rancher/k3s/k3s.yaml') }}"
   changed_when: true
@@ -41,6 +49,8 @@
 - name: Add cloud-provider-openstack Helm repo
   ansible.builtin.command:
     cmd: helm repo add cpo https://kubernetes.github.io/cloud-provider-openstack
+  environment:
+    KUBECONFIG: "{{ kubeconfig | default('/etc/rancher/k3s/k3s.yaml') }}"
   changed_when: true
   failed_when: false
 
@@ -49,7 +59,7 @@
     cmd: >-
       helm install cinder-csi cpo/openstack-cinder-csi
       --namespace kube-system
-      --set csi.plugin.image.repository=localhost:{{ registry_port }}/cinder-csi-plugin
+      --set csi.plugin.image.repository={{ cinder_image_registry }}/cinder-csi-plugin
       --set csi.plugin.image.tag={{ csi_image_version }}
       --set csi.plugin.image.pullPolicy=IfNotPresent
       --set secret.enabled=true

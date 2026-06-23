@@ -84,15 +84,19 @@ directly on the VM instead:
 ansible-playbook playbooks/deploy-csi.yml -e @profiles/manila-lvm.yml -e build_on_vm=true
 ```
 
-## Known limitations
+## Architecture notes
 
-**Cinder CSI requires OpenStack VMs**: The Cinder CSI node plugin calls the
-OpenStack metadata service (169.254.169.254) to get the instance UUID, which is
-needed for volume attachment via the Nova API. Since this harness runs k3s
-directly on a libvirt VM (not a Nova instance), Cinder CSI pods will deploy but
-volume attachment will fail. Full Cinder CSI e2e testing requires running k3s
-inside a Nova VM within DevStack. Manila CSI does not have this limitation since
-it mounts NFS/CephFS shares without needing a Nova instance identity.
+**Manila CSI** runs k3s directly on the DevStack VM. Manila shares are mounted
+via NFS/CephFS without needing a Nova instance identity, so a fake metadata
+service (served via Apache at 169.254.169.254) satisfies the CSI node plugin's
+metadata check.
+
+**Cinder CSI** requires a real Nova instance because volume attachment calls
+`POST /servers/{instanceID}/os-volume_attachments` — the instance must exist in
+Nova's database. The harness boots a Nova VM inside DevStack with k3s installed
+via cloud-init (`nova-k3s` role), then deploys the CSI driver to that VM's k3s
+cluster. The CSI image is built on the DevStack host and pulled from its Docker
+registry over the internal network.
 
 ## Configuration
 

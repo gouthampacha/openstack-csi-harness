@@ -17,7 +17,8 @@
   hosts: devstack
   become: true
   roles:
-    - k3s
+    - role: k3s
+      when: csi_driver != "cinder"
     - docker-registry
 
 - name: Build and deploy CSI
@@ -27,6 +28,8 @@
     - csi-build
     - role: csi-manila
       when: csi_driver == "manila"
+    - role: nova-k3s
+      when: csi_driver == "cinder"
     - role: csi-cinder
       when: csi_driver == "cinder"
 

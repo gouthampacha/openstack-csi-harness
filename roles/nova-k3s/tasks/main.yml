@@ -1,0 +1,173 @@
+---
+- name: Get DevStack host IP
+  ansible.builtin.shell:
+    cmd: ip -4 addr show scope global | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -1
+  register: devstack_ip
+  changed_when: false
+
+- name: Set DevStack IP fact
+  ansible.builtin.set_fact:
+    devstack_ip_address: "{{ devstack_ip.stdout | trim }}"
+
+- name: Read registry CA certificate
+  ansible.builtin.slurp:
+    src: /etc/docker-registry/certs/cert.pem
+  register: registry_cert
+
+- name: Set registry CA cert fact
+  ansible.builtin.set_fact:
+    registry_ca_cert: "{{ registry_cert.content | b64decode }}"
+
+- name: Create OpenStack resources for k3s VM
+  ansible.builtin.shell:
+    cmd: |
+      source {{ devstack_workdir }}/openrc admin admin
+
+      openstack image show {{ nova_vm_image }} > /dev/null 2>&1
+      if [ $? -ne 0 ]; then
+        curl -sSL {{ nova_vm_image_url }} -o /tmp/{{ nova_vm_image }}.img
+        openstack image create {{ nova_vm_image }} \
+          --container-format bare --disk-format qcow2 \
+          --public --file /tmp/{{ nova_vm_image }}.img
+      fi
+
+      source {{ devstack_workdir }}/openrc demo demo
+
+      openstack keypair show {{ nova_vm_keypair }} > /dev/null 2>&1
+      if [ $? -ne 0 ]; then
+        test -e /opt/stack/.ssh/id_rsa || ssh-keygen -t rsa -b 4096 -N "" -f /opt/stack/.ssh/id_rsa
+        openstack keypair create --public-key /opt/stack/.ssh/id_rsa.pub {{ nova_vm_keypair }}
+      fi
+
+      openstack security group show {{ nova_vm_sg }} > /dev/null 2>&1
+      if [ $? -ne 0 ]; then
+        openstack security group create {{ nova_vm_sg }}
+        openstack security group rule create --proto icmp {{ nova_vm_sg }}
+        openstack security group rule create --protocol tcp --dst-port 1:65535 {{ nova_vm_sg }}
+        openstack security group rule create --protocol udp --dst-port 1:65535 {{ nova_vm_sg }}
+      fi
+
+      openstack subnet set private-subnet --dns-nameserver 8.8.8.8 || true
+    executable: /bin/bash
+  become_user: "{{ devstack_user }}"
+  environment:
+    HOME: /opt/stack
+  changed_when: true
+
+- name: Render k3s cloud-init userdata
+  ansible.builtin.template:
+    src: userdata.yml.j2
+    dest: /tmp/k3s-userdata.yml
+    mode: "0644"
+
+- name: Create and boot k3s Nova VM
+  ansible.builtin.shell:
+    cmd: |
+      source {{ devstack_workdir }}/openrc demo demo
+
+      openstack server show {{ nova_vm_name }} > /dev/null 2>&1
+      if [ $? -ne 0 ]; then
+        port_id=$(openstack port create {{ nova_vm_name }}-port \
+          --network private --security-group {{ nova_vm_sg }} \
+          -f value -c id)
+        fip=$(openstack floating ip create public -c floating_ip_address -f value)
+        openstack floating ip set $fip --port $port_id
+
+        openstack server create {{ nova_vm_name }} \
+          --image {{ nova_vm_image }} \
+          --flavor {{ nova_vm_flavor }} \
+          --key-name {{ nova_vm_keypair }} \
+          --nic port-id=$port_id \
+          --user-data /tmp/k3s-userdata.yml \
+          --wait
+      fi
+    executable: /bin/bash
+  become_user: "{{ devstack_user }}"
+  environment:
+    HOME: /opt/stack
+  changed_when: true
+
+- name: Get k3s VM floating IP
+  ansible.builtin.shell:
+    cmd: |
+      source {{ devstack_workdir }}/openrc demo demo
+      openstack floating ip list --port {{ nova_vm_name }}-port \
+        -c "Floating IP Address" -f value
+    executable: /bin/bash
+  become_user: "{{ devstack_user }}"
+  environment:
+    HOME: /opt/stack
+  register: k3s_fip
+  changed_when: false
+
+- name: Set k3s VM floating IP fact
+  ansible.builtin.set_fact:
+    k3s_vm_fip: "{{ k3s_fip.stdout | trim }}"
+
+- name: Wait for SSH on k3s VM
+  ansible.builtin.wait_for:
+    host: "{{ k3s_vm_fip }}"
+    port: 22
+    delay: 10
+    timeout: 300
+
+- name: Wait for k3s installation to finish
+  ansible.builtin.shell:
+    cmd: >-
+      ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
+      -i /opt/stack/.ssh/id_rsa ubuntu@{{ k3s_vm_fip }}
+      "sudo test -f /etc/rancher/k3s/k3s.yaml"
+  become_user: "{{ devstack_user }}"
+  environment:
+    HOME: /opt/stack
+  register: k3s_ready
+  until: k3s_ready.rc == 0
+  retries: 60
+  delay: 10
+  changed_when: false
+
+- name: Create .kube directory
+  ansible.builtin.file:
+    path: /opt/stack/.kube
+    state: directory
+    owner: "{{ devstack_user }}"
+    mode: "0755"
+
+- name: Fetch kubeconfig from k3s VM
+  ansible.builtin.shell:
+    cmd: |
+      ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+        -i /opt/stack/.ssh/id_rsa ubuntu@{{ k3s_vm_fip }} \
+        "sudo cat /etc/rancher/k3s/k3s.yaml" | \
+        sed "s/127.0.0.1/{{ k3s_vm_fip }}/" > /opt/stack/.kube/config
+      chmod 644 /opt/stack/.kube/config
+    executable: /bin/bash
+  become_user: "{{ devstack_user }}"
+  environment:
+    HOME: /opt/stack
+  changed_when: true
+
+- name: Set kubeconfig fact for subsequent roles
+  ansible.builtin.set_fact:
+    kubeconfig: /opt/stack/.kube/config
+    cinder_registry_url: "{{ devstack_ip_address }}:{{ registry_port }}"
+
+- name: Wait for k3s node to be ready
+  ansible.builtin.shell:
+    cmd: >-
+      KUBECONFIG=/opt/stack/.kube/config
+      kubectl get nodes -o jsonpath='{.items[0].status.conditions[?(@.type=="Ready")].status}'
+  become_user: "{{ devstack_user }}"
+  environment:
+    HOME: /opt/stack
+  register: k3s_node_ready
+  until: "'True' in k3s_node_ready.stdout"
+  retries: 30
+  delay: 10
+  changed_when: false
+
+- name: Install Helm on DevStack host
+  ansible.builtin.command:
+    cmd: snap install helm --classic
+  changed_when: true
+  failed_when: false
