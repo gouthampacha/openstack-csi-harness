@@ -1,7 +1,7 @@
 ---
 - name: Get DevStack host IP
   ansible.builtin.shell:
-    cmd: ip -4 addr show scope global | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -1
+    cmd: ip -4 addr show scope global | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | grep -v '^169\.254\.' | head -1
   register: devstack_ip
   changed_when: false
 
@@ -18,10 +18,24 @@
   ansible.builtin.set_fact:
     registry_ca_cert: "{{ registry_cert.content | b64decode }}"
 
+- name: Install kubectl on DevStack host
+  ansible.builtin.shell:
+    cmd: |
+      if ! command -v kubectl &>/dev/null; then
+        curl -sSL "https://dl.k8s.io/release/$(curl -sSL https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" \
+          -o /usr/local/bin/kubectl
+        chmod +x /usr/local/bin/kubectl
+      fi
+    executable: /bin/bash
+  changed_when: true
+
 - name: Create OpenStack resources for k3s VM
   ansible.builtin.shell:
     cmd: |
       source {{ devstack_workdir }}/openrc admin admin
+
+      openstack flavor show {{ nova_vm_flavor }} > /dev/null 2>&1 || \
+        openstack flavor create {{ nova_vm_flavor }} --ram 2048 --disk 20 --vcpus 2
 
       openstack image show {{ nova_vm_image }} > /dev/null 2>&1
       if [ $? -ne 0 ]; then
