@@ -69,6 +69,18 @@
 - name: Build locally and push
   when: not (build_on_vm | default(false) | bool)
   block:
+    - name: Configure insecure registry for Podman
+      ansible.builtin.copy:
+        content: |
+          [[registry]]
+          location = "{{ remote_registry_url }}"
+          insecure = true
+        dest: /etc/containers/registries.conf.d/local-registry.conf
+        mode: "0644"
+      delegate_to: localhost
+      become: true
+      when: container_engine == 'podman'
+
     - name: Build CSI image locally
       ansible.builtin.command:
         cmd: "make build-local-image-{{ csi_image_name }}"
