@@ -69,14 +69,24 @@
 - name: Build locally and push
   when: not (build_on_vm | default(false) | bool)
   block:
-    - name: Build and push CSI image locally
+    - name: Build CSI image locally
       ansible.builtin.command:
-        cmd: "make push-multiarch-image-{{ csi_image_name }}"
+        cmd: "make build-local-image-{{ csi_image_name }}"
         chdir: "{{ cpo_source_dir }}"
       environment:
         CONTAINER_ENGINE: "{{ container_engine }}"
         REGISTRY: "{{ remote_registry_url }}"
         VERSION: "{{ csi_image_version }}"
+      delegate_to: localhost
+      become: false
+      changed_when: true
+
+    - name: Push CSI image to registry
+      ansible.builtin.command:
+        cmd: >-
+          {{ container_engine }} push
+          {{ '--tls-verify=false' if container_engine == 'podman' else '' }}
+          {{ remote_registry_url }}/{{ csi_image_name }}:{{ csi_image_version }}
       delegate_to: localhost
       become: false
       changed_when: true
